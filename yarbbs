@@ -1,0 +1,76 @@
+#!/bin/bash
+#  -----------------------------------------------------------------------------
+#  Yet Another Rsync-Based Backup Script
+#  Copyright (C) 2014, 2015, 2017, 2019 fulmeek
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+#  -----------------------------------------------------------------------------
+
+if [[ $# -lt 2 ]]; then
+    echo 'Usage: yarbbs <destination> <sources...>'
+    exit 0
+fi
+
+#  -----------------------------------------------------------------------------
+
+DEST="$1/"
+shift
+SOURCES=("$@")
+
+SNAPSHOT="${DEST}$(date '+%Y-%m/%Y%m%d-%H%M')/"
+SNAPLINK="${DEST}latest"
+SNAPLOG="${SNAPSHOT}rsync.log"
+LOCKFILE="${DEST}yarbbs.lock"
+
+OPTIONS=(-avR --delete --stats --human-readable "--log-file=${SNAPLOG}")
+OPTIONS+=('--exclude=lost+found/' '--exclude=.gvfs/' '--exclude=*cache/' '--exclude=*Cache/')
+
+if [[ ! -d "$DEST" ]]; then
+    echo "$DEST is missing or not a valid destination" >&2
+    exit 1
+fi
+
+if [[ -f "$LOCKFILE" ]]; then
+    echo "Backup still in progress" >&2
+    exit 1
+fi
+
+touch "$LOCKFILE"
+
+#  -----------------------------------------------------------------------------
+
+if [[ -L "$SNAPLINK" ]]; then
+    OPTIONS+=("--link-dest=$(realpath "${SNAPLINK}")")
+fi
+
+mkdir -p "$SNAPSHOT"
+if rsync "${OPTIONS[@]}" "${SOURCES[@]}" "$SNAPSHOT"; then
+    rm -f "$SNAPLINK"
+    ln -rs "$SNAPSHOT" "$SNAPLINK"
+else
+    echo
+    echo "Backup failed, rsync exited abnormally" >&2
+fi
+
+#  -----------------------------------------------------------------------------
+
+rm "$LOCKFILE"
+sync
+
+echo
+df -h --output=size,avail,pcent,target "$DEST"
+echo
+
+echo "----------------------"
+printf "Total time:%5d:%02d:%02d\n" $((SECONDS/3600)) $(((SECONDS%3600)/60)) $((SECONDS%60))
+echo "----------------------"
